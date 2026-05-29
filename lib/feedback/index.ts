@@ -1,5 +1,9 @@
-export { FEEDBACK_TYPE_LABELS, FEEDBACK_STORAGE_KEY } from "@/lib/feedback/constants";
 export {
+  FEEDBACK_STORAGE_KEY,
+  FEEDBACK_TYPE_LABELS,
+} from "@/lib/feedback/constants";
+export {
+  clearFeedbackSubmissions,
   getFeedbackSubmissions,
   getFeedbackSubmissionsNewestFirst,
   saveFeedbackSubmission,
@@ -7,7 +11,6 @@ export {
 export {
   FEEDBACK_TYPES,
   type CreateFeedbackInput,
-  type FeedbackMetadata,
   type FeedbackSubmission,
   type FeedbackType,
 } from "@/lib/feedback/types";

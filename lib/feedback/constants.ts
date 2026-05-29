@@ -7,4 +7,7 @@ export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = {
   general: "General Feedback",
 };
 
-export const FEEDBACK_STORAGE_KEY = "soundsteward-feedback";
+export const FEEDBACK_STORAGE_KEY = "soundsteward_feedback";
+
+/** @deprecated Previous localStorage key — migrated on read */
+export const LEGACY_FEEDBACK_STORAGE_KEY = "soundsteward-feedback";

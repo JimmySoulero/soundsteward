@@ -13,12 +13,8 @@ export type FeedbackSubmission = {
   type: FeedbackType;
   message: string;
   email: string | null;
+  page: string | null;
   createdAt: string;
-  pageUrl: string | null;
-  metadata: FeedbackMetadata;
-};
-
-export type FeedbackMetadata = {
   userAgent: string | null;
 };
 
@@ -26,6 +22,6 @@ export type CreateFeedbackInput = {
   type: FeedbackType;
   message: string;
   email?: string | null;
-  pageUrl?: string | null;
-  metadata?: Partial<FeedbackMetadata>;
+  page?: string | null;
+  userAgent?: string | null;
 };

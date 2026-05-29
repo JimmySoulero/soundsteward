@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageContainer } from "@/components/landing/PageContainer";
 import { FEEDBACK_TYPE_LABELS } from "@/lib/feedback/constants";
-import { getFeedbackSubmissionsNewestFirst } from "@/lib/feedback/storage";
+import {
+  clearFeedbackSubmissions,
+  getFeedbackSubmissionsNewestFirst,
+} from "@/lib/feedback/storage";
 import type { FeedbackSubmission } from "@/lib/feedback/types";
 
 function formatDate(iso: string): string {
@@ -18,10 +21,19 @@ export default function AdminFeedbackPage() {
   const [submissions, setSubmissions] = useState<FeedbackSubmission[]>([]);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
+  const loadSubmissions = useCallback(() => {
     setSubmissions(getFeedbackSubmissionsNewestFirst());
-    setMounted(true);
   }, []);
+
+  useEffect(() => {
+    loadSubmissions();
+    setMounted(true);
+  }, [loadSubmissions]);
+
+  const handleClear = () => {
+    clearFeedbackSubmissions();
+    loadSubmissions();
+  };
 
   return (
     <main className="min-h-screen bg-background py-10 lg:py-14">
@@ -37,20 +49,33 @@ export default function AdminFeedbackPage() {
             <p className="mt-2 text-sm text-muted">
               Local submissions · newest first
             </p>
+            <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted">
+              Local MVP mode: feedback is stored only in this browser until a
+              database is connected.
+            </p>
           </div>
-          <Link
-            href="/"
-            className="inline-flex h-10 items-center justify-center rounded-full border border-border-soft bg-card px-5 text-sm text-muted transition-colors hover:text-text"
-          >
-            ← Home
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleClear}
+              className="inline-flex h-10 items-center justify-center rounded-full border border-border-soft bg-card px-5 text-sm text-muted transition-colors hover:border-clay/40 hover:text-text"
+            >
+              Clear Feedback
+            </button>
+            <Link
+              href="/"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-border-soft bg-card px-5 text-sm text-muted transition-colors hover:text-text"
+            >
+              ← Home
+            </Link>
+          </div>
         </div>
 
         {!mounted ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : submissions.length === 0 ? (
           <div className="rounded-2xl border border-border-soft bg-card p-8 text-center">
-            <p className="text-muted">No feedback submissions yet.</p>
+            <p className="text-muted">No feedback submitted yet.</p>
           </div>
         ) : (
           <ul className="space-y-4">
@@ -82,10 +107,16 @@ export default function AdminFeedbackPage() {
                       <dd>{submission.email}</dd>
                     </div>
                   )}
-                  {submission.pageUrl && (
+                  {submission.page && (
                     <div className="flex flex-wrap gap-x-2">
                       <dt className="text-olive">Page</dt>
-                      <dd className="break-all">{submission.pageUrl}</dd>
+                      <dd className="break-all">{submission.page}</dd>
+                    </div>
+                  )}
+                  {submission.userAgent && (
+                    <div className="flex flex-wrap gap-x-2">
+                      <dt className="text-olive">User agent</dt>
+                      <dd className="break-all">{submission.userAgent}</dd>
                     </div>
                   )}
                   <div className="flex flex-wrap gap-x-2">
