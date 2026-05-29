@@ -1,5 +1,14 @@
+import { aMajorLesson } from "@/lib/lessons/data/a-major";
+import { abMajorLesson } from "@/lib/lessons/data/ab-major";
+import { bMajorLesson } from "@/lib/lessons/data/b-major";
+import { bbMajorLesson } from "@/lib/lessons/data/bb-major";
 import { cMajorLesson } from "@/lib/lessons/data/c-major";
 import { dMajorLesson } from "@/lib/lessons/data/d-major";
+import { dbMajorLesson } from "@/lib/lessons/data/db-major";
+import { eMajorLesson } from "@/lib/lessons/data/e-major";
+import { ebMajorLesson } from "@/lib/lessons/data/eb-major";
+import { fMajorLesson } from "@/lib/lessons/data/f-major";
+import { fSharpMajorLesson } from "@/lib/lessons/data/f-sharp-major";
 import { gMajorLesson } from "@/lib/lessons/data/g-major";
 import type { LessonDefinition } from "@/lib/lessons/types";
 
@@ -7,6 +16,15 @@ export const lessons = {
   cMajor: cMajorLesson,
   gMajor: gMajorLesson,
   dMajor: dMajorLesson,
+  aMajor: aMajorLesson,
+  eMajor: eMajorLesson,
+  bMajor: bMajorLesson,
+  fSharpMajor: fSharpMajorLesson,
+  dbMajor: dbMajorLesson,
+  abMajor: abMajorLesson,
+  ebMajor: ebMajorLesson,
+  bbMajor: bbMajorLesson,
+  fMajor: fMajorLesson,
 } as const satisfies Record<string, LessonDefinition>;
 
 export type LessonId = keyof typeof lessons;
