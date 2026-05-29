@@ -25,7 +25,7 @@ export const gMajorLesson: LessonDefinition = {
   },
   completionMessage:
     "You can now read Nashville Numbers in the key of G.",
-  nextLessonLabel: "Next: D Major — Coming Soon",
+  nextLessonLabel: "Next: D Major",
   challenges: [
     {
       id: "g1",

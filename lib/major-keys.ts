@@ -7,7 +7,7 @@ export type MajorKey = {
 export const MAJOR_KEYS: MajorKey[] = [
   { id: "C", label: "C", available: true },
   { id: "G", label: "G", available: true },
-  { id: "D", label: "D", available: false },
+  { id: "D", label: "D", available: true },
   { id: "A", label: "A", available: false },
   { id: "E", label: "E", available: false },
   { id: "B", label: "B", available: false },

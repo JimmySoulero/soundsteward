@@ -25,6 +25,7 @@ export {
 } from "@/lib/lessons/engine";
 
 export { cMajorLesson } from "@/lib/lessons/data/c-major";
+export { dMajorLesson } from "@/lib/lessons/data/d-major";
 export { gMajorLesson } from "@/lib/lessons/data/g-major";
 export {
   getLessonById,

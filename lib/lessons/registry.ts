@@ -1,10 +1,12 @@
 import { cMajorLesson } from "@/lib/lessons/data/c-major";
+import { dMajorLesson } from "@/lib/lessons/data/d-major";
 import { gMajorLesson } from "@/lib/lessons/data/g-major";
 import type { LessonDefinition } from "@/lib/lessons/types";
 
 export const lessons = {
   cMajor: cMajorLesson,
   gMajor: gMajorLesson,
+  dMajor: dMajorLesson,
 } as const satisfies Record<string, LessonDefinition>;
 
 export type LessonId = keyof typeof lessons;
