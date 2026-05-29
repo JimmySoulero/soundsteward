@@ -11,11 +11,19 @@ import {
 import { motion } from "framer-motion";
 import * as Tone from "tone";
 import { C_MAJOR_CHORDS } from "@/lib/piano/c-major-chords";
+import type {
+  IntroProgressionId,
+  ScaleNumber,
+  ScalePlaybackNote,
+  TriadPlayback,
+} from "@/lib/lessons/types";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
-const SCALE_NOTE_DURATION = 0.34;
-const SCALE_STEP = 0.44;
+const SCALE_NOTE_DURATION = 0.32;
+const SCALE_STEP = 0.38;
+const CHORD_DURATION = 0.92;
+const PROGRESSION_STEP = 1.22;
 const WHITE_KEY_COUNT = 8;
 const SALAMANDER_BASE = "https://tonejs.github.io/audio/salamander/";
 
@@ -83,7 +91,9 @@ export type PianoKeyboardHandle = {
   highlightKeyByNote: (note: string, durationMs?: number) => void;
   playKeyIds: (keyIds: string[], duration?: number) => Promise<void>;
   playChordByNumber: (number: "1" | "4" | "5") => Promise<void>;
+  playChordByDegree: (degree: ScaleNumber) => Promise<void>;
   play145Progression: () => Promise<void>;
+  playProgressionById: (id: IntroProgressionId) => Promise<void>;
   clearHighlight: () => void;
 };
 
@@ -99,6 +109,24 @@ type PianoKeyboardProps = {
   noteToKeyId?: Record<string, string>;
   /** key id → Nashville number label for lesson mode */
   keyNumbers?: Record<string, string>;
+  /** When set, Play Scale / chord buttons use this lesson's audio */
+  lessonScaleKeyIds?: string[];
+  lessonScalePlayback?: ScalePlaybackNote[];
+  lessonChordsByNumber?: Record<"1" | "4" | "5", string[]>;
+  lessonTriadsByDegree?: Record<ScaleNumber, TriadPlayback>;
+  lessonProgressions?: Record<IntroProgressionId, TriadPlayback[]>;
+  onPlaybackEnd?: () => void;
+  onProgressionStep?: (stepIndex: number, totalSteps: number) => void;
+  /** Controlled numbers/notes display */
+  showNumbers?: boolean;
+  onShowNumbersChange?: (value: boolean) => void;
+  /** Show the numbers toggle inside the piano card */
+  showNumbersToggle?: boolean;
+  /** Labels above the keys (top row) */
+  showTopLabels?: boolean;
+  /** Tighter layout for lesson intro panel */
+  dense?: boolean;
+  showKeyHeader?: boolean;
 };
 
 export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>(
@@ -114,10 +142,33 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
       keyLabel = "C",
       noteToKeyId: noteToKeyIdProp,
       keyNumbers,
+      lessonScaleKeyIds,
+      lessonScalePlayback,
+      lessonChordsByNumber,
+      lessonTriadsByDegree,
+      lessonProgressions,
+      onPlaybackEnd,
+      onProgressionStep,
+      showNumbers: showNumbersProp,
+      onShowNumbersChange,
+      showNumbersToggle = true,
+      showTopLabels = true,
+      dense = false,
+      showKeyHeader = true,
     },
     ref,
   ) {
-    const [showNumbers, setShowNumbers] = useState(defaultShowNumbers);
+    const [internalShowNumbers, setInternalShowNumbers] = useState(defaultShowNumbers);
+    const isNumbersControlled = showNumbersProp !== undefined;
+    const showNumbers = isNumbersControlled ? showNumbersProp : internalShowNumbers;
+
+    const toggleShowNumbers = useCallback(() => {
+      const next = !showNumbers;
+      if (!isNumbersControlled) {
+        setInternalShowNumbers(next);
+      }
+      onShowNumbersChange?.(next);
+    }, [isNumbersControlled, onShowNumbersChange, showNumbers]);
     const [activeKey, setActiveKey] = useState<string | null>(null);
     const [highlightedKeys, setHighlightedKeys] = useState<string[]>([]);
     const [isPlayingScale, setIsPlayingScale] = useState(false);
@@ -243,128 +294,263 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
       [ensureAudioStarted, triggerNote],
     );
 
+    const playVoicedChord = useCallback(
+      async (
+        playback: TriadPlayback,
+        duration = CHORD_DURATION,
+      ) => {
+        if (playback.pitches.length === 0) return;
+
+        await ensureAudioStarted();
+        setIsPlayingSequence(true);
+        triggerNote(playback.pitches, duration);
+        flashKeys(playback.keyIds, duration * 1000);
+
+        const timeout = setTimeout(() => {
+          setActiveKey(null);
+          setIsPlayingSequence(false);
+          onPlaybackEnd?.();
+        }, duration * 1000);
+        scaleTimeoutsRef.current.push(timeout);
+      },
+      [ensureAudioStarted, flashKeys, onPlaybackEnd, triggerNote],
+    );
+
     const playKeyIds = useCallback(
-      async (keyIds: string[], duration = 1.1) => {
+      async (keyIds: string[], duration = CHORD_DURATION) => {
         const pitches = keyIds
           .map((id) => KEY_BY_ID[id]?.pitch)
           .filter(Boolean) as string[];
         if (pitches.length === 0) return;
 
-        await ensureAudioStarted();
-        setIsPlayingSequence(true);
-        triggerNote(pitches, duration);
-        flashKeys(keyIds, duration * 1000);
-
-        const timeout = setTimeout(() => {
-          setActiveKey(null);
-          setIsPlayingSequence(false);
-        }, duration * 1000);
-        scaleTimeoutsRef.current.push(timeout);
+        await playVoicedChord({ pitches, keyIds }, duration);
       },
-      [ensureAudioStarted, flashKeys, triggerNote],
+      [playVoicedChord],
+    );
+
+    const playScaleFromPlayback = useCallback(
+      async (entries: ScalePlaybackNote[]) => {
+        if (isPlayingScale || isPlayingSequence || entries.length === 0) return;
+
+        await ensureAudioStarted();
+        clearScheduled();
+        setIsPlayingScale(true);
+        setActiveKey(null);
+        setHighlightedKeys([]);
+        onScalePlayed?.();
+
+        const startTime = Tone.now();
+
+        entries.forEach(({ pitch, keyId }, index) => {
+          triggerNote(pitch, SCALE_NOTE_DURATION, startTime + index * SCALE_STEP);
+
+          const highlightAt = index * SCALE_STEP * 1000;
+          const highlightTimeout = setTimeout(() => {
+            setActiveKey(keyId);
+            setHighlightedKeys([keyId]);
+          }, highlightAt);
+          scaleTimeoutsRef.current.push(highlightTimeout);
+
+          const clearAt = highlightAt + SCALE_NOTE_DURATION * 1000;
+          const clearTimeoutId = setTimeout(() => {
+            setActiveKey((current) => (current === keyId ? null : current));
+            setHighlightedKeys([]);
+          }, clearAt);
+          scaleTimeoutsRef.current.push(clearTimeoutId);
+        });
+
+        const finishAt = entries.length * SCALE_STEP * 1000;
+        const finishTimeout = setTimeout(() => {
+          setIsPlayingScale(false);
+          setActiveKey(null);
+          setHighlightedKeys([]);
+          onPlaybackEnd?.();
+        }, finishAt);
+        scaleTimeoutsRef.current.push(finishTimeout);
+      },
+      [
+        clearScheduled,
+        ensureAudioStarted,
+        isPlayingScale,
+        isPlayingSequence,
+        onPlaybackEnd,
+        onScalePlayed,
+        triggerNote,
+      ],
+    );
+
+    const playScaleFromKeyIds = useCallback(
+      async (keyIds: string[]) => {
+        if (isPlayingScale || isPlayingSequence || keyIds.length === 0) return;
+
+        await ensureAudioStarted();
+        clearScheduled();
+        setIsPlayingScale(true);
+        setActiveKey(null);
+        setHighlightedKeys([]);
+        onScalePlayed?.();
+
+        const startTime = Tone.now();
+
+        keyIds.forEach((keyId, index) => {
+          const key = KEY_BY_ID[keyId];
+          if (!key) return;
+
+          triggerNote(key.pitch, SCALE_NOTE_DURATION, startTime + index * SCALE_STEP);
+
+          const highlightAt = index * SCALE_STEP * 1000;
+          const highlightTimeout = setTimeout(() => {
+            setActiveKey(keyId);
+            setHighlightedKeys([keyId]);
+          }, highlightAt);
+          scaleTimeoutsRef.current.push(highlightTimeout);
+
+          const clearAt = highlightAt + SCALE_NOTE_DURATION * 1000;
+          const clearTimeoutId = setTimeout(() => {
+            setActiveKey((current) => (current === keyId ? null : current));
+            setHighlightedKeys([]);
+          }, clearAt);
+          scaleTimeoutsRef.current.push(clearTimeoutId);
+        });
+
+        const finishAt = keyIds.length * SCALE_STEP * 1000;
+        const finishTimeout = setTimeout(() => {
+          setIsPlayingScale(false);
+          setActiveKey(null);
+          setHighlightedKeys([]);
+          onPlaybackEnd?.();
+        }, finishAt);
+        scaleTimeoutsRef.current.push(finishTimeout);
+      },
+      [
+        clearScheduled,
+        ensureAudioStarted,
+        isPlayingScale,
+        isPlayingSequence,
+        onPlaybackEnd,
+        onScalePlayed,
+        triggerNote,
+      ],
     );
 
     const playCMajor = useCallback(async () => {
-      if (isPlayingScale || isPlayingSequence) return;
+      await playScaleFromKeyIds([...C_MAJOR_SCALE]);
+    }, [playScaleFromKeyIds]);
 
-      await ensureAudioStarted();
-      clearScheduled();
-      setIsPlayingScale(true);
-      setActiveKey(null);
-      setHighlightedKeys([]);
-      onScalePlayed?.();
-
-      const startTime = Tone.now();
-
-      C_MAJOR_SCALE.forEach((keyId, index) => {
-        const key = KEY_BY_ID[keyId];
-        if (!key) return;
-
-        triggerNote(key.pitch, SCALE_NOTE_DURATION, startTime + index * SCALE_STEP);
-
-        const highlightAt = index * SCALE_STEP * 1000;
-        const highlightTimeout = setTimeout(() => {
-          setActiveKey(keyId);
-          setHighlightedKeys([keyId]);
-        }, highlightAt);
-        scaleTimeoutsRef.current.push(highlightTimeout);
-
-        const clearAt = highlightAt + SCALE_NOTE_DURATION * 1000;
-        const clearTimeoutId = setTimeout(() => {
-          setActiveKey((current) => (current === keyId ? null : current));
-          setHighlightedKeys([]);
-        }, clearAt);
-        scaleTimeoutsRef.current.push(clearTimeoutId);
-      });
-
-      const finishAt = C_MAJOR_SCALE.length * SCALE_STEP * 1000;
-      const finishTimeout = setTimeout(() => {
-        setIsPlayingScale(false);
-        setActiveKey(null);
-        setHighlightedKeys([]);
-      }, finishAt);
-      scaleTimeoutsRef.current.push(finishTimeout);
-    }, [
-      clearScheduled,
-      ensureAudioStarted,
-      isPlayingScale,
-      isPlayingSequence,
-      triggerNote,
-    ]);
+    const resolveChordKeyIds = useCallback(
+      (number: "1" | "4" | "5") =>
+        lessonChordsByNumber?.[number] ?? [...C_MAJOR_CHORDS[number].keyIds],
+      [lessonChordsByNumber],
+    );
 
     const playChordByNumber = useCallback(
       async (number: "1" | "4" | "5") => {
-        const chord = C_MAJOR_CHORDS[number];
-        await playKeyIds([...chord.keyIds], 1.15);
+        const triad = lessonTriadsByDegree?.[number];
+        if (triad) {
+          await playVoicedChord(triad);
+          return;
+        }
+        await playKeyIds(resolveChordKeyIds(number));
       },
-      [playKeyIds],
+      [lessonTriadsByDegree, playKeyIds, playVoicedChord, resolveChordKeyIds],
+    );
+
+    const playChordByDegree = useCallback(
+      async (degree: ScaleNumber) => {
+        const triad = lessonTriadsByDegree?.[degree];
+        if (!triad) return;
+        await playVoicedChord(triad);
+      },
+      [lessonTriadsByDegree, playVoicedChord],
+    );
+
+    const playProgression = useCallback(
+      async (chords: TriadPlayback[]) => {
+        if (isPlayingSequence || isPlayingScale || chords.length === 0) return;
+
+        await ensureAudioStarted();
+        clearScheduled();
+        setIsPlayingSequence(true);
+
+        const startTime = Tone.now();
+
+        chords.forEach((chord, index) => {
+          const at = startTime + index * PROGRESSION_STEP;
+          triggerNote(chord.pitches, CHORD_DURATION, at);
+
+          const highlightAt = index * PROGRESSION_STEP * 1000;
+          const highlightTimeout = setTimeout(() => {
+            setHighlightedKeys([...chord.keyIds]);
+            onProgressionStep?.(index, chords.length);
+          }, highlightAt);
+          scaleTimeoutsRef.current.push(highlightTimeout);
+
+          const clearAt = highlightAt + CHORD_DURATION * 1000;
+          const clearTimeoutId = setTimeout(() => {
+            setHighlightedKeys([]);
+          }, clearAt);
+          scaleTimeoutsRef.current.push(clearTimeoutId);
+        });
+
+        const finishAt = chords.length * PROGRESSION_STEP * 1000;
+        const finishTimeout = setTimeout(() => {
+          setIsPlayingSequence(false);
+          setHighlightedKeys([]);
+          onPlaybackEnd?.();
+        }, finishAt);
+        scaleTimeoutsRef.current.push(finishTimeout);
+      },
+      [
+        clearScheduled,
+        ensureAudioStarted,
+        isPlayingScale,
+        isPlayingSequence,
+        onPlaybackEnd,
+        onProgressionStep,
+        triggerNote,
+      ],
     );
 
     const play145Progression = useCallback(async () => {
-      if (isPlayingSequence || isPlayingScale) return;
-
-      await ensureAudioStarted();
-      clearScheduled();
-      setIsPlayingSequence(true);
-
-      const chords = ["1", "4", "5"] as const;
-      const chordDuration = 1.0;
-      const step = 1.35;
-      const startTime = Tone.now();
-
-      chords.forEach((num, index) => {
-        const chord = C_MAJOR_CHORDS[num];
-        const pitches = chord.keyIds
+      const preset = lessonProgressions?.["1-4-5"];
+      if (preset) {
+        await playProgression(preset);
+        return;
+      }
+      const chords = (["1", "4", "5"] as const).map((num) => ({
+        pitches: resolveChordKeyIds(num)
           .map((id) => KEY_BY_ID[id]?.pitch)
-          .filter(Boolean) as string[];
-        const at = startTime + index * step;
-        triggerNote(pitches, chordDuration, at);
+          .filter(Boolean) as string[],
+        keyIds: resolveChordKeyIds(num),
+      }));
+      await playProgression(chords);
+    }, [lessonProgressions, playProgression, resolveChordKeyIds]);
 
-        const highlightAt = index * step * 1000;
-        const highlightTimeout = setTimeout(() => {
-          setHighlightedKeys([...chord.keyIds]);
-        }, highlightAt);
-        scaleTimeoutsRef.current.push(highlightTimeout);
+    const playProgressionById = useCallback(
+      async (id: IntroProgressionId) => {
+        const preset = lessonProgressions?.[id];
+        if (!preset) return;
+        await playProgression(preset);
+      },
+      [lessonProgressions, playProgression],
+    );
 
-        const clearAt = highlightAt + chordDuration * 1000;
-        const clearTimeoutId = setTimeout(() => {
-          setHighlightedKeys([]);
-        }, clearAt);
-        scaleTimeoutsRef.current.push(clearTimeoutId);
-      });
-
-      const finishAt = chords.length * step * 1000;
-      const finishTimeout = setTimeout(() => {
-        setIsPlayingSequence(false);
-        setHighlightedKeys([]);
-      }, finishAt);
-      scaleTimeoutsRef.current.push(finishTimeout);
+    const playLessonScale = useCallback(async () => {
+      if (lessonScalePlayback?.length) {
+        await playScaleFromPlayback(lessonScalePlayback);
+        return;
+      }
+      if (lessonScaleKeyIds?.length) {
+        await playScaleFromKeyIds(lessonScaleKeyIds);
+        return;
+      }
+      await playCMajor();
     }, [
-      clearScheduled,
-      ensureAudioStarted,
-      isPlayingScale,
-      isPlayingSequence,
-      triggerNote,
+      lessonScaleKeyIds,
+      lessonScalePlayback,
+      playCMajor,
+      playScaleFromKeyIds,
+      playScaleFromPlayback,
     ]);
 
     const noteToKeyId = noteToKeyIdProp ?? NOTE_TO_KEY_ID;
@@ -391,7 +577,7 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
     useImperativeHandle(
       ref,
       () => ({
-        playScale: playCMajor,
+        playScale: playLessonScale,
         playKeyByNote: async (note: string) => {
           const keyId = noteToKeyId[note];
           if (keyId) {
@@ -402,7 +588,9 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
         highlightKeyByNote,
         playKeyIds,
         playChordByNumber,
+        playChordByDegree,
         play145Progression,
+        playProgressionById,
         clearHighlight: () => {
           setActiveKey(null);
           setHighlightedKeys([]);
@@ -410,8 +598,12 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
       }),
       [
         playCMajor,
+        playLessonScale,
+        playScaleFromKeyIds,
         playChordByNumber,
+        playChordByDegree,
         play145Progression,
+        playProgressionById,
         playKeyId,
         playKeyIds,
         highlightKeyByNote,
@@ -435,97 +627,140 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
     }, [isPlayingScale, isPlayingSequence]);
 
     const inputLocked = isPlayingScale || isPlayingSequence;
+    const shellPadding = dense
+      ? "rounded-xl p-2"
+      : compact
+        ? "rounded-2xl p-2.5 sm:p-3"
+        : "p-4 sm:p-5 lg:rounded-[2rem] lg:p-6";
+    const whiteKeyHeight = dense
+      ? "h-[clamp(3.25rem,11vw,5rem)]"
+      : compact
+        ? "h-[88px] sm:h-[96px]"
+        : "h-[140px] sm:h-[152px] lg:h-[168px]";
+    const blackKeyHeight = dense
+      ? "h-[clamp(2rem,6.5vw,3rem)]"
+      : compact
+        ? "h-[54px] sm:h-[58px]"
+        : "h-[86px] sm:h-[94px] lg:h-[104px]";
+    const keyLabelClass = dense
+      ? "text-[8px] tracking-tight min-[420px]:text-[9px] sm:text-[10px]"
+      : "text-[11px] sm:text-xs";
+    const topLabelClass = dense
+      ? "text-[8px] tracking-tight min-[420px]:text-[9px] sm:text-[10px]"
+      : "text-[11px] sm:text-xs";
+    const showHeaderBar =
+      showKeyHeader || (showNumbersToggle && (compact || dense));
 
     return (
       <div className="mx-auto w-full max-w-full select-none">
         <div
-          className={`rounded-[1.75rem] border border-border-soft bg-card shadow-[0_2px_4px_rgba(31,29,26,0.04),0_20px_50px_-12px_rgba(31,29,26,0.18),inset_0_1px_0_rgba(247,241,231,0.9)] ${
-            compact ? "rounded-2xl p-2.5 sm:p-3" : "p-4 sm:p-5 lg:rounded-[2rem] lg:p-6"
-          }`}
+          className={`rounded-[1.75rem] border border-border-soft bg-card shadow-[0_2px_4px_rgba(31,29,26,0.04),0_20px_50px_-12px_rgba(31,29,26,0.18),inset_0_1px_0_rgba(247,241,231,0.9)] ${shellPadding}`}
         >
-          <div
-            className={`flex items-center justify-between gap-3 border-b border-border-soft/80 ${
-              compact ? "mb-2.5 pb-2" : "mb-5 gap-4 pb-4"
-            }`}
-          >
-            <div>
-              {!compact && (
-                <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-olive">
-                  SoundSteward
-                </p>
+          {showHeaderBar && (
+            <div
+              className={`flex items-center justify-between gap-2 border-b border-border-soft/80 ${
+                dense ? "mb-2 pb-2" : compact ? "mb-2.5 pb-2" : "mb-5 gap-4 pb-4"
+              }`}
+            >
+              {showKeyHeader ? (
+                <div>
+                  {!compact && !dense && (
+                    <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-olive">
+                      SoundSteward
+                    </p>
+                  )}
+                  <p
+                    className={`font-medium tracking-tight text-text ${
+                      dense || compact ? "text-xs" : "mt-1 text-sm"
+                    }`}
+                  >
+                    Key of {keyLabel}
+                  </p>
+                  {!compact && !dense && (
+                    <p className="mt-0.5 font-mono text-[9px] tracking-[0.12em] uppercase text-muted">
+                      Sound: Soft Piano
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <span className="sr-only">Piano keyboard</span>
               )}
-              <p
-                className={`font-medium tracking-tight text-text ${
-                  compact ? "text-xs" : "mt-1 text-sm"
-                }`}
-              >
-                Key of {keyLabel}
-              </p>
-              {!compact && (
-                <p className="mt-0.5 font-mono text-[9px] tracking-[0.12em] uppercase text-muted">
-                  Sound: Soft Piano
-                </p>
+              {showNumbersToggle && (
+                <button
+                  type="button"
+                  onClick={toggleShowNumbers}
+                  className={`group ml-auto flex items-center rounded-full border border-border bg-section/80 transition-colors hover:border-walnut/30 hover:bg-section ${
+                    dense ? "gap-2 px-2.5 py-1" : "gap-2.5 px-3.5 py-2"
+                  }`}
+                  aria-pressed={showNumbers}
+                >
+                  <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-muted transition-colors group-hover:text-text">
+                    {showNumbers ? "Numbers" : "Notes"}
+                  </span>
+                  <span
+                    className={`relative rounded-full transition-colors ${
+                      dense ? "h-4 w-7" : "h-[18px] w-[34px]"
+                    } ${showNumbers ? "bg-walnut" : "bg-border"}`}
+                  >
+                    <span
+                      className={`absolute top-[3px] size-3 rounded-full bg-card shadow-sm transition-transform ${
+                        showNumbers
+                          ? dense
+                            ? "left-[13px]"
+                            : "left-[17px]"
+                          : "left-[3px]"
+                      }`}
+                    />
+                  </span>
+                </button>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => setShowNumbers((value) => !value)}
-              className="group flex items-center gap-2.5 rounded-full border border-border bg-section/80 px-3.5 py-2 transition-colors hover:border-walnut/30 hover:bg-section"
-              aria-pressed={showNumbers}
-            >
-              <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-muted transition-colors group-hover:text-text">
-                {showNumbers ? "Numbers" : "Notes"}
-              </span>
-              <span
-                className={`relative h-[18px] w-[34px] rounded-full transition-colors ${
-                  showNumbers ? "bg-walnut" : "bg-border"
-                }`}
-              >
-                <span
-                  className={`absolute top-[3px] size-3 rounded-full bg-card shadow-sm transition-transform ${
-                    showNumbers ? "left-[17px]" : "left-[3px]"
-                  }`}
-                />
-              </span>
-            </button>
-          </div>
+          )}
 
           <div
             className={`relative rounded-2xl bg-section/70 shadow-[inset_0_2px_8px_rgba(31,29,26,0.06)] ${
-              compact ? "p-2" : "p-3 sm:p-4"
+              dense ? "p-1.5" : compact ? "p-2" : "p-3 sm:p-4"
             }`}
           >
-            <div className={`relative ${compact ? "mb-1 h-4" : "mb-2 h-5"}`}>
-              {showNumbers &&
-                WHITE_KEYS.map((key, whiteIndex) => (
-                  <div
-                    key={`num-${key.id}`}
-                    className="absolute bottom-0 flex justify-center"
-                    style={{
-                      left: `${whiteKeyLeftPercent(whiteIndex)}%`,
-                      width: `${(1 / WHITE_KEY_COUNT) * 100}%`,
-                    }}
-                  >
-                    <span className="font-mono text-[11px] font-medium tracking-wide text-walnut sm:text-xs">
-                      {getDisplayLabel(key)}
-                    </span>
-                  </div>
-                ))}
-              {showNumbers &&
-                BLACK_KEYS.map((key) => (
-                  <div
-                    key={`num-${key.id}`}
-                    className="absolute bottom-0 -translate-x-1/2"
-                    style={{
-                      left: `${blackKeyLeftPercent(key.afterWhiteIndex!)}%`,
-                    }}
-                  >
-                    <span className="font-mono text-[10px] font-medium tracking-wide text-clay sm:text-[11px]">
-                      {getDisplayLabel(key)}
-                    </span>
-                  </div>
-                ))}
-            </div>
+            {showTopLabels && (
+              <div
+                className={`relative ${dense ? "mb-0.5 h-2.5 min-[420px]:h-3" : compact ? "mb-1 h-4" : "mb-2 h-5"}`}
+              >
+                {showNumbers &&
+                  WHITE_KEYS.map((key, whiteIndex) => (
+                    <div
+                      key={`num-${key.id}`}
+                      className="absolute bottom-0 flex justify-center overflow-hidden px-0.5"
+                      style={{
+                        left: `${whiteKeyLeftPercent(whiteIndex)}%`,
+                        width: `${(1 / WHITE_KEY_COUNT) * 100}%`,
+                      }}
+                    >
+                      <span
+                        className={`truncate font-mono font-medium text-walnut ${topLabelClass}`}
+                      >
+                        {getDisplayLabel(key)}
+                      </span>
+                    </div>
+                  ))}
+                {showNumbers &&
+                  BLACK_KEYS.map((key) => (
+                    <div
+                      key={`num-${key.id}`}
+                      className="absolute bottom-0 max-w-[2rem] -translate-x-1/2 overflow-hidden"
+                      style={{
+                        left: `${blackKeyLeftPercent(key.afterWhiteIndex!)}%`,
+                      }}
+                    >
+                      <span
+                        className={`block truncate font-mono font-medium text-clay ${topLabelClass}`}
+                      >
+                        {getDisplayLabel(key)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
 
             <div className="relative flex rounded-xl bg-border/30 p-[3px] shadow-[0_8px_24px_-8px_rgba(31,29,26,0.2)]">
               {WHITE_KEYS.map((key, index) => {
@@ -552,11 +787,7 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
                         ? "inset 0 3px 10px rgba(31,29,26,0.12), 0 1px 0 rgba(247,241,231,0.8)"
                         : "inset 0 -2px 0 rgba(31,29,26,0.06), 0 4px 12px rgba(31,29,26,0.08)",
                     }}
-                    className={`relative z-0 min-w-0 flex-1 touch-manipulation ${
-                      compact
-                        ? "h-[88px] sm:h-[96px]"
-                        : "h-[140px] sm:h-[152px] lg:h-[168px]"
-                    } ${
+                    className={`relative z-0 min-w-0 flex-1 touch-manipulation ${whiteKeyHeight} ${
                       index === 0
                         ? "rounded-l-[10px]"
                         : index === WHITE_KEYS.length - 1
@@ -565,7 +796,9 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
                     } border-r border-[#cfc3b0]/70 bg-gradient-to-b from-[#f7f1e7] via-[#f0e9dc] to-[#e8dfd0] last:border-r-0`}
                     aria-label={`${key.note}${showNumbers && keyNumbers?.[key.id] ? `, Nashville ${keyNumbers[key.id]}` : showNumbers ? `, Nashville ${key.nashville}` : ""}`}
                   >
-                    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] font-medium tracking-wide text-muted sm:bottom-3.5 sm:text-xs">
+                    <span
+                      className={`absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 truncate px-0.5 font-mono font-medium text-muted min-[420px]:bottom-2.5 ${keyLabelClass}`}
+                    >
                       {getDisplayLabel(key)}
                     </span>
                   </motion.button>
@@ -598,12 +831,12 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
                         ? "inset 0 3px 8px rgba(0,0,0,0.45), 0 2px 6px rgba(31,29,26,0.25)"
                         : "0 8px 18px rgba(31,29,26,0.35), inset 0 -1px 0 rgba(255,255,255,0.06)",
                     }}
-                    className={`absolute top-[3px] z-10 -translate-x-1/2 touch-manipulation rounded-b-[8px] bg-gradient-to-b from-[#3a3732] to-[#1f1d1a] ${
-                      compact ? "h-[54px] sm:h-[58px]" : "h-[86px] sm:h-[94px] lg:h-[104px]"
-                    }`}
+                    className={`absolute top-[3px] z-10 -translate-x-1/2 touch-manipulation rounded-b-[8px] bg-gradient-to-b from-[#3a3732] to-[#1f1d1a] ${blackKeyHeight}`}
                     aria-label={`${key.note}${showNumbers && keyNumbers?.[key.id] ? `, Nashville ${keyNumbers[key.id]}` : showNumbers ? `, Nashville ${key.nashville}` : ""}`}
                   >
-                    <span className="absolute bottom-2 left-1/2 -translate-x-1/2 font-mono text-[9px] font-medium tracking-wide text-[#a39e96] sm:text-[10px]">
+                    <span
+                      className={`absolute bottom-1.5 left-1/2 max-w-full -translate-x-1/2 truncate px-0.5 font-mono font-medium text-[#a39e96] ${keyLabelClass}`}
+                    >
                       {getDisplayLabel(key)}
                     </span>
                   </motion.button>
@@ -621,7 +854,7 @@ export const PianoKeyboard = forwardRef<PianoKeyboardHandle, PianoKeyboardProps>
                 {showScaleButton && (
                   <button
                     type="button"
-                    onClick={() => void playCMajor()}
+                    onClick={() => void playLessonScale()}
                     disabled={inputLocked}
                     className="inline-flex h-9 items-center justify-center rounded-full border border-walnut/25 bg-card/80 px-4 font-mono text-[10px] tracking-[0.1em] uppercase text-walnut transition-colors hover:border-walnut/45 hover:bg-card disabled:cursor-not-allowed disabled:opacity-50 sm:text-[11px]"
                   >

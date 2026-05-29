@@ -23,6 +23,8 @@ export const cMajorLesson: LessonDefinition = {
     A: "a",
     B: "b",
   },
+  introExplanation:
+    "C Major has no sharps or flats. The notes are C, D, E, F, G, A, and B. In Nashville Numbers, C is 1, F is 4, and G is 5. These numbers help you understand songs and move them to other keys.",
   completionMessage:
     "You now understand the foundation of Nashville Numbers.",
   nextLessonLabel: "Next: G Major",

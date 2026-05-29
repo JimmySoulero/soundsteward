@@ -111,6 +111,7 @@ export default function LearnPage() {
 
       {activeLessonDefinition && (
         <LessonModal
+          key={activeLessonDefinition.id}
           lesson={activeLessonDefinition}
           onClose={handleCloseLesson}
           onComplete={handleCompleteLesson}

@@ -6,17 +6,30 @@ import {
   PianoKeyboard,
   type PianoKeyboardHandle,
 } from "@/components/landing/PianoKeyboard";
+import { LessonIntroScreen } from "@/components/learn/LessonIntroScreen";
 import { NumberReferenceCard } from "@/components/learn/NumberReferenceCard";
 import {
   acceptsPianoNote,
   answerFromPianoNote,
+  getAllTriadsPlayback,
   getCorrectFeedback,
   getHintReference,
+  getIntroProgressionPlaybacks,
+  getIntroProgressions,
+  getLessonChordsByNumber,
+  getScaleKeyIds,
+  getScalePlayback,
   getWrongFeedback,
   noteForAnswer,
   resolveLessonChallenges,
 } from "@/lib/lessons/engine";
 import type { LessonDefinition, ResolvedChallenge } from "@/lib/lessons/types";
+
+type LessonPhase = "menu" | "intro" | "game";
+
+function resolveOpenPhase(completed: boolean): LessonPhase {
+  return completed ? "menu" : "intro";
+}
 
 type LessonModalProps = {
   lesson: LessonDefinition;
@@ -41,6 +54,24 @@ export function LessonModal({
     [lesson],
   );
   const hintReference = useMemo(() => getHintReference(lesson), [lesson]);
+  const lessonScaleKeyIds = useMemo(() => getScaleKeyIds(lesson), [lesson]);
+  const lessonScalePlayback = useMemo(() => getScalePlayback(lesson), [lesson]);
+  const lessonChordsByNumber = useMemo(
+    () => getLessonChordsByNumber(lesson),
+    [lesson],
+  );
+  const lessonTriadsByDegree = useMemo(
+    () => getAllTriadsPlayback(lesson),
+    [lesson],
+  );
+  const introProgressions = useMemo(
+    () => getIntroProgressions(lesson),
+    [lesson],
+  );
+  const lessonProgressions = useMemo(
+    () => getIntroProgressionPlaybacks(lesson),
+    [lesson],
+  );
   const keyNumbers = useMemo(() => {
     const map: Record<string, string> = {};
     for (const [number, note] of Object.entries(lesson.numbers)) {
@@ -67,21 +98,45 @@ export function LessonModal({
   const [wrongAttemptCount, setWrongAttemptCount] = useState(0);
   const [showReferenceCard, setShowReferenceCard] = useState(false);
   const [hintAutoShown, setHintAutoShown] = useState(false);
+  const [phase, setPhase] = useState<LessonPhase>(() =>
+    resolveOpenPhase(hasCompletedBefore),
+  );
+  const [introShowNumbers, setIntroShowNumbers] = useState(true);
 
   const challenge = challenges[challengeIndex];
-
-  useEffect(() => {
-    return () => {
-      if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
-      if (hintTimeoutRef.current) clearTimeout(hintTimeoutRef.current);
-    };
-  }, []);
 
   const hideReferenceCard = useCallback(() => {
     if (hintTimeoutRef.current) clearTimeout(hintTimeoutRef.current);
     hintTimeoutRef.current = null;
     setShowReferenceCard(false);
     setHintAutoShown(false);
+  }, []);
+
+  const resetGameState = useCallback(() => {
+    if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
+    hideReferenceCard();
+    setChallengeIndex(0);
+    setScore(0);
+    setFeedback(null);
+    setFeedbackTone(null);
+    setSelectedChoice(null);
+    setIsLocked(false);
+    setIsComplete(false);
+    setWrongAttemptCount(0);
+    pianoRef.current?.clearHighlight();
+  }, [hideReferenceCard]);
+
+  useEffect(() => {
+    setPhase(resolveOpenPhase(hasCompletedBefore));
+    setIntroShowNumbers(true);
+    resetGameState();
+  }, [lesson.id, resetGameState]);
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
+      if (hintTimeoutRef.current) clearTimeout(hintTimeoutRef.current);
+    };
   }, []);
 
   const showReferenceCardTemporarily = useCallback((auto = false) => {
@@ -101,9 +156,9 @@ export function LessonModal({
   }, [challengeIndex, hideReferenceCard]);
 
   useEffect(() => {
-    if (isComplete || !challenge?.audioNote) return;
+    if (phase !== "game" || isComplete || !challenge?.audioNote) return;
     void pianoRef.current?.playKeyByNote(challenge.audioNote);
-  }, [challenge, isComplete]);
+  }, [challenge, isComplete, phase]);
 
   const playAnswerFeedback = useCallback(
     async (
@@ -123,19 +178,21 @@ export function LessonModal({
     [lesson],
   );
 
-  const resetLessonState = useCallback(() => {
-    if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
-    hideReferenceCard();
-    setChallengeIndex(0);
-    setScore(0);
-    setFeedback(null);
-    setFeedbackTone(null);
-    setSelectedChoice(null);
-    setIsLocked(false);
-    setIsComplete(false);
-    setWrongAttemptCount(0);
-    pianoRef.current?.clearHighlight();
-  }, [hideReferenceCard]);
+  const handleReviewLesson = useCallback(() => {
+    resetGameState();
+    setPhase("intro");
+  }, [resetGameState]);
+
+  const handleReplayGame = useCallback(() => {
+    resetGameState();
+    setPhase("game");
+  }, [resetGameState]);
+
+  const handleResetProgress = useCallback(() => {
+    onResetProgress();
+    resetGameState();
+    setPhase("intro");
+  }, [onResetProgress, resetGameState]);
 
   const advanceChallenge = useCallback(() => {
     if (challengeIndex >= total - 1) {
@@ -152,13 +209,12 @@ export function LessonModal({
   }, [challengeIndex, onComplete, total]);
 
   const handleReplayLesson = useCallback(() => {
-    resetLessonState();
-  }, [resetLessonState]);
+    handleReplayGame();
+  }, [handleReplayGame]);
 
-  const handleResetProgress = useCallback(() => {
-    onResetProgress();
-    resetLessonState();
-  }, [onResetProgress, resetLessonState]);
+  const handleResetProgressFromComplete = useCallback(() => {
+    handleResetProgress();
+  }, [handleResetProgress]);
 
   const handleAnswer = useCallback(
     async (rawAnswer: string, fromPiano = false) => {
@@ -208,9 +264,30 @@ export function LessonModal({
     [challenge, handleAnswer, lesson],
   );
 
-  const progressPercent = isComplete
-    ? 100
-    : ((challengeIndex + (feedbackTone === "correct" ? 1 : 0)) / total) * 100;
+  const handleStartGame = useCallback(() => {
+    resetGameState();
+    setPhase("game");
+  }, [resetGameState]);
+
+  const progressPercent =
+    phase === "intro" || phase === "menu"
+      ? 0
+      : isComplete
+        ? 100
+        : ((challengeIndex + (feedbackTone === "correct" ? 1 : 0)) / total) *
+          100;
+
+  const modalHeight =
+    phase === "intro"
+      ? "min(92dvh,780px)"
+      : phase === "menu"
+        ? "min(92dvh,420px)"
+        : "min(92dvh,680px)";
+
+  const modalWidthClass =
+    phase === "intro" ? "max-w-lg sm:max-w-xl lg:max-w-2xl" : "max-w-md sm:max-w-lg";
+
+  const phaseDebugLabel = `Phase: ${phase}`;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
@@ -225,25 +302,86 @@ export function LessonModal({
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="relative flex h-[min(92dvh,680px)] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-border-soft bg-background shadow-[0_24px_80px_-16px_rgba(31,29,26,0.28)] sm:max-w-lg"
+        className={`relative flex w-full flex-col overflow-hidden rounded-3xl border border-border-soft bg-background shadow-[0_24px_80px_-16px_rgba(31,29,26,0.28)] ${modalWidthClass}`}
+        style={{ height: modalHeight }}
       >
-        <div className="shrink-0 border-b border-border-soft px-5 py-4 sm:px-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-olive">
-                {lesson.title}
-                {hasCompletedBefore && !isComplete && (
-                  <span className="ml-2 text-muted">· Review</span>
-                )}
-              </p>
-              {!isComplete ? (
-                <p className="mt-0.5 text-sm font-medium text-text">
-                  Challenge {challengeIndex + 1} of {total}
-                </p>
+        <div className={`shrink-0 border-b border-border-soft sm:px-6 ${phase === "intro" || phase === "menu" ? "px-4 py-3" : "px-5 py-4"}`}>
+          <p className="font-mono text-[9px] tracking-[0.14em] uppercase text-clay">
+            {phaseDebugLabel}
+          </p>
+          <div className="mt-1 flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {phase === "intro" ? (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="truncate text-lg font-medium tracking-[-0.02em] text-text sm:text-xl">
+                      {lesson.title}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setIntroShowNumbers((value) => !value)}
+                      className="group hidden shrink-0 items-center gap-2 rounded-full border border-border bg-section/80 px-3 py-1.5 transition-colors hover:border-walnut/30 hover:bg-section min-[420px]:flex"
+                      aria-pressed={introShowNumbers}
+                    >
+                      <span className="font-mono text-[10px] tracking-[0.1em] uppercase text-muted transition-colors group-hover:text-text">
+                        Numbers {introShowNumbers ? "ON" : "OFF"}
+                      </span>
+                      <span
+                        className={`relative h-4 w-7 rounded-full transition-colors ${
+                          introShowNumbers ? "bg-walnut" : "bg-border"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-[3px] size-2.5 rounded-full bg-card shadow-sm transition-transform ${
+                            introShowNumbers ? "left-[13px]" : "left-[3px]"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 min-[420px]:hidden">
+                    <p className="text-sm font-medium text-muted">
+                      Learn before you play
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIntroShowNumbers((value) => !value)}
+                      className="group flex shrink-0 items-center gap-2 rounded-full border border-border bg-section/80 px-2.5 py-1 transition-colors hover:border-walnut/30 hover:bg-section"
+                      aria-pressed={introShowNumbers}
+                    >
+                      <span className="font-mono text-[9px] tracking-[0.08em] uppercase text-muted">
+                        Numbers {introShowNumbers ? "ON" : "OFF"}
+                      </span>
+                    </button>
+                  </div>
+                  <p className="mt-0.5 hidden text-sm font-medium text-muted min-[420px]:block">
+                    Learn before you play
+                  </p>
+                </>
               ) : (
-                <p className="mt-0.5 text-sm font-medium text-text">
-                  Lesson complete
-                </p>
+                <>
+                  <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-olive">
+                    {lesson.title}
+                    {phase === "game" &&
+                      hasCompletedBefore &&
+                      !isComplete && (
+                        <span className="ml-2 text-muted">· Review</span>
+                      )}
+                  </p>
+                  {phase === "menu" ? (
+                    <p className="mt-0.5 text-sm font-medium text-text">
+                      Lesson completed
+                    </p>
+                  ) : !isComplete ? (
+                    <p className="mt-0.5 text-sm font-medium text-text">
+                      Challenge {challengeIndex + 1} of {total}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-sm font-medium text-text">
+                      Lesson complete
+                    </p>
+                  )}
+                </>
               )}
             </div>
             <button
@@ -255,18 +393,68 @@ export function LessonModal({
               ✕
             </button>
           </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-section">
-            <motion.div
-              className="h-full rounded-full bg-walnut"
-              animate={{ width: `${progressPercent}%` }}
-              transition={{ duration: 0.35, ease: "easeOut" }}
-            />
-          </div>
+          {phase === "game" && (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-section">
+              <motion.div
+                className="h-full rounded-full bg-walnut"
+                animate={{ width: `${progressPercent}%` }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col justify-center px-5 py-4 sm:px-6">
-          <AnimatePresence mode="wait">
-            {isComplete ? (
+        {phase === "menu" ? (
+          <div className="flex min-h-0 flex-1 flex-col justify-center px-5 py-6 sm:px-6">
+            <div className="text-center">
+              <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-olive">
+                Welcome back
+              </p>
+              <p className="mt-3 text-lg leading-relaxed text-muted">
+                You have already completed {lesson.title}. Choose how you want to
+                continue.
+              </p>
+              <div className="mt-6 flex w-full flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleReviewLesson}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-full border border-walnut/30 bg-card text-sm font-medium text-text transition-colors hover:border-walnut/50 hover:bg-section"
+                >
+                  Review Lesson
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReplayGame}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-full bg-walnut text-sm font-medium text-card transition-colors hover:bg-clay"
+                >
+                  Replay Game
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetProgress}
+                  className="inline-flex h-10 w-full items-center justify-center rounded-full border border-border-soft bg-section/60 text-sm text-muted transition-colors hover:border-clay/40 hover:text-text"
+                >
+                  Reset Progress
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : phase === "intro" ? (
+          <LessonIntroScreen
+            lesson={lesson}
+            pianoRef={pianoRef}
+            onStartGame={handleStartGame}
+            keyNumbers={keyNumbers}
+            showNumbers={introShowNumbers}
+            lessonScalePlayback={lessonScalePlayback}
+            lessonTriadsByDegree={lessonTriadsByDegree}
+            introProgressions={introProgressions}
+            lessonProgressions={lessonProgressions}
+          />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col justify-center px-5 py-4 sm:px-6">
+            <AnimatePresence mode="wait">
+              {isComplete ? (
               <motion.div
                 key="complete"
                 initial={{ opacity: 0, y: 8 }}
@@ -291,11 +479,18 @@ export function LessonModal({
                     onClick={handleReplayLesson}
                     className="inline-flex h-11 w-full items-center justify-center rounded-full bg-walnut text-sm font-medium text-card transition-colors hover:bg-clay"
                   >
-                    Replay Lesson
+                    Replay Game
                   </button>
                   <button
                     type="button"
-                    onClick={handleResetProgress}
+                    onClick={handleReviewLesson}
+                    className="inline-flex h-10 w-full items-center justify-center rounded-full border border-walnut/30 bg-card text-sm font-medium text-text transition-colors hover:border-walnut/50 hover:bg-section"
+                  >
+                    Review Lesson
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetProgressFromComplete}
                     className="inline-flex h-10 w-full items-center justify-center rounded-full border border-border-soft bg-card text-sm text-muted transition-colors hover:border-clay/40 hover:text-text"
                   >
                     Reset Progress
@@ -381,7 +576,9 @@ export function LessonModal({
             )}
           </AnimatePresence>
         </div>
+        )}
 
+        {phase === "game" && (
         <div className="shrink-0 border-t border-border-soft bg-section/30 px-3 py-3 sm:px-4">
           {!isComplete && (
             <div className="mb-2 space-y-2">
@@ -423,9 +620,12 @@ export function LessonModal({
             keyLabel={lesson.keyId}
             noteToKeyId={lesson.noteToKeyId}
             keyNumbers={keyNumbers}
-            onNoteSelect={isComplete ? undefined : handlePianoSelect}
+            lessonScaleKeyIds={lessonScaleKeyIds}
+            lessonChordsByNumber={lessonChordsByNumber}
+            onNoteSelect={!isComplete ? handlePianoSelect : undefined}
           />
         </div>
+        )}
       </motion.div>
     </div>
   );
