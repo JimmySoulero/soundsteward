@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { FeedbackCenter } from "@/components/feedback/FeedbackCenter";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,7 +29,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} scroll-smooth antialiased`}
     >
-      <body className="min-h-full bg-background text-text">{children}</body>
+      <body className="min-h-full bg-background text-text">
+        {children}
+        <FeedbackCenter />
+      </body>
     </html>
   );
 }
