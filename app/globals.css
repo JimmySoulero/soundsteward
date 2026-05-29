@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #efe7da;
+  --section: #e3d7c5;
+  --card: #f7f1e7;
+  --text: #1f1d1a;
+  --muted: #5f574e;
+  --walnut: #8a6746;
+  --clay: #a76f4d;
+  --olive: #6f7667;
+  --border: #cfc3b0;
+  --border-soft: #ddd2c2;
+  --key-white-top: #f7f1e7;
+  --key-white-bottom: #e8dfd0;
+  --key-black-top: #3a3732;
+  --key-black-bottom: #1f1d1a;
+  --surface-dark: #2a2723;
+
+  /* Semantic aliases for Tailwind */
+  --foreground: var(--text);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-section: var(--section);
+  --color-card: var(--card);
   --color-foreground: var(--foreground);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-walnut: var(--walnut);
+  --color-clay: var(--clay);
+  --color-olive: var(--olive);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-surface-dark: var(--surface-dark);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--walnut);
+  color: var(--card);
+}
+
+.page-container {
+  width: 100%;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+@media (min-width: 768px) {
+  .page-container {
+    padding-left: 40px;
+    padding-right: 40px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media (min-width: 1024px) {
+  .page-container {
+    padding-left: 64px;
+    padding-right: 64px;
+  }
 }
